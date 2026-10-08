@@ -1,0 +1,382 @@
+{
+  "name": "Qualify new leads into Google Sheets CRM",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "211f733d-19bc-4550-b804-27240445bb25",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f1cfc02c-28b6-45d0-b97f-ef370a2255d9",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -112,
+        176
+      ],
+      "webhookId": "211f733d-19bc-4550-b804-27240445bb25"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.body.inquiry || $json.body.message || $json.body.text || '' }}",
+        "options": {
+          "systemMessage": "You are an AI Lead Qualification Agent for IndiaMART, India's largest B2B marketplace. \nYour job is to analyze incoming raw buyer inquiries, extract structured data, and format the output strictly as a JSON object.\n\nThis is an ongoing conversation with the buyer. Use the whole conversation history (not just the latest message) and merge everything the buyer has said so far. Never ask again for details already given.\n\nExtract these fields:\n- product_name: (String, the core item the buyer wants)\n- quantity: (String or Number, the amount requested if mentioned, else \"Not specified\")\n- delivery_location: (String, city or region if mentioned, else \"Not specified\")\n- lead_status: (String, strictly choose between \"Qualified\" or \"Needs Clarification\". If critical technical details like size, grade, power rating, or exact specs are missing for a B2B transaction, mark it as \"Needs Clarification\")\n- missing_info: (List or string of what technical specs are missing, else \"None\")\n- agent_response: (String, a polite, professional message to the buyer. If qualified, confirm receipt. If it needs clarification, ask 1-2 sharp B2B questions to get the missing specs).\n\nYou must output ONLY valid JSON matching these keys. Do not include markdown code block syntax like ```json, just output the raw JSON object."
+        }
+      },
+      "id": "6df4a2e6-f8d7-4801-9c9f-12d122849bcc",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        112,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "builtInTools": {
+          "codeInterpreter": false
+        },
+        "options": {}
+      },
+      "id": "4dee9b6d-3220-4183-9bc0-a8cd96a7fd5f",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        128,
+        416
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook').item.json.body.session_id || $('Webhook').item.json.body.email || $('Webhook').item.json.body.phone || 'default' }}",
+        "contextWindowLength": 20
+      },
+      "id": "9aaac78b-9a51-4dea-bc11-2a6996834f3a",
+      "name": "Conversation Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        256,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// This parses the AI agent string output into clean JSON objects for Google Sheets\nconst inputItem = $input.first().json;\nlet rawOutput = inputItem.output || inputItem.text || \"{}\";\n\n// Clean up markdown blocks if the LLM accidentally included them\nrawOutput = rawOutput.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\nlet parsedData;\ntry {\n  parsedData = JSON.parse(rawOutput);\n} catch (error) {\n  parsedData = {\n    product_name: \"Parsing Error\",\n    quantity: \"N/A\",\n    delivery_location: \"N/A\",\n    lead_status: \"Needs Clarification\",\n    missing_info: \"Could not parse output\",\n    agent_response: \"Could you please re-state your requirement?\"\n  };\n}\n\nreturn [{ json: parsedData }];"
+      },
+      "id": "a7784bc9-1d6d-4034-bd97-e0c9b1154a7f",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "status",
+              "leftValue": "={{ $json.lead_status }}",
+              "rightValue": "Qualified",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7a5eb8fa-17dd-461f-b533-c1dea02fc4c2",
+      "name": "Is Lead Complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        688,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1D7lov8DagSBntvX3HvPAM1zade2cUdg2sNbBeYaDIzg/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1D7lov8DagSBntvX3HvPAM1zade2cUdg2sNbBeYaDIzg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $now.toISO() }}",
+            "Raw Buyer Inquiry": "={{ $('Webhook').item.json.body.inquiry || $('Webhook').item.json.body.message || $('Webhook').item.json.body.text || '' }}",
+            "Product Name": "={{ $json.product_name }}",
+            "Quantity": "={{ $json.quantity }}",
+            "Delivery Location": "={{ $json.delivery_location }}",
+            "Lead Status": "={{ $json.lead_status }}",
+            "Missing Info": "={{ Array.isArray($json.missing_info) ? $json.missing_info.join(\", \") : $json.missing_info }}",
+            "Agent Response": "={{ $json.agent_response }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Raw Buyer Inquiry",
+              "displayName": "Raw Buyer Inquiry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Product Name",
+              "displayName": "Product Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Quantity",
+              "displayName": "Quantity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Delivery Location",
+              "displayName": "Delivery Location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead Status",
+              "displayName": "Lead Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Missing Info",
+              "displayName": "Missing Info",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Agent Response",
+              "displayName": "Agent Response",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ff57008b-1aa4-4986-8138-761921cbca9f",
+      "name": "Append row in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        912,
+        80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "BfRNt0X0ecLF4P88",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'complete', reply: $('Code in JavaScript').item.json.agent_response, data: $('Code in JavaScript').item.json }) }}",
+        "options": {}
+      },
+      "id": "275d0022-dcef-4cdd-ad3d-4c7060d46199",
+      "name": "Reply - Lead Saved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1136,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'needs_more_info', reply: $json.agent_response, missing_info: $json.missing_info, data: $json }) }}",
+        "options": {}
+      },
+      "id": "17941b33-6926-43b7-8747-27c9e38953b4",
+      "name": "Reply - Ask For Missing Info",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        912,
+        272
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conversation Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Is Lead Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Lead Complete": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply - Ask For Missing Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Reply - Lead Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "1c9fb243-e0fe-413a-a621-17a9fb551ac1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d854e2391a1d7650d5e83bc89d2d10c64e5fbf120b0f852385c920a0fb3aac9d"
+  },
+  "nodeGroups": [],
+  "id": "fa73ctncjoKO7w2l",
+  "tags": []
+}
